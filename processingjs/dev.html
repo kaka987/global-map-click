@@ -1,0 +1,356 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1.0, width=1024" />
+    <title>YEAHPING</title>
+
+    <style type="text/css">
+        * {
+            margin:0;
+            padding:0;
+        }
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+        body {
+            background: #0e151e;
+        }
+        #map, #canvas_mask {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        #canvas_mask {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #map #txt div {
+            position: absolute;
+            font-size: 0.7em;
+            color: #5f96b7;
+            top: 0;
+            left: 0;
+            width: 200px;
+            padding: 2px 0 0 2px;
+            border-left: 1px solid #ddd;
+            font-family: monospace;
+        }
+        #map #logo {
+            position: absolute;
+            left: 20px;
+            bottom: 20px;
+            height: 55px;
+            width: 237px;
+            background: url(logo.png) no-repeat center center;
+        }
+        #map #click-count {
+            width: 200px;
+            height: 42px;
+            position: absolute;
+            top: 50%;
+            margin-top: -21px;
+            left: 50%;
+            margin-left: -100px;
+            background: rgba(255, 255, 255, 0.5);
+            border: #fff;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(14, 21, 30, 0.5);
+            padding: 20px 0;
+            text-align: center;
+        }
+        #map #click-count span {
+            display: block;
+        }
+    </style>
+
+    <script type="text/javascript" src="libs/jquery-2.0.3.min.js"></script>
+    <script type="text/javascript" src="libs/processing-1.4.1.min.js"></script>
+    <script type="text/javascript" src="libs/moment.min.js"></script>
+    <script type="text/javascript">
+        var offerDict = {};
+        var utcStart = moment(moment().utc().format('YYYY-MM-DD HH:mm:ss')).unix();
+        $(function(){
+            $.ajax({
+                url: 'offers.json',
+                dataType: 'json'
+            })
+            .done(function (offers) {
+                offerDict = offers;
+            });
+        })
+        var getGeo = function (ip) {
+            return $.Deferred(function (dfd) {
+                $.ajax({
+                    url: 'http://172.30.10.62/clickdata/test/getlatandlonbyip',
+                    data: 'ips=' + ip,
+                    dataType: 'json',
+                    method: 'post',
+                    cache: true,
+                    crossDomain: true,
+                    timeout: 60000,
+                    success: function (data) {
+                        if (!isArray(data)) {
+                            dfd.resolve(data);
+                        } else {
+                            dfd.reject(data);
+                        }
+                    }
+                })
+            }).promise();
+        }
+    </script>
+    <script type="text/javascript">
+    //added by monkee
+    window.bp = {};
+    bp.w = 200;
+    bp.h = 48;
+    bp.MAX_COUNT = 20;
+    //is conflict
+    bp.isC = function(ax, ay, bx, by){
+        if(Math.abs(ax -bx) > bp.w || Math.abs(ay - by) > bp.h){
+            return false;
+        }
+        return true;
+    };
+    bp.count = bp.MAX_COUNT;
+    bp.store = [];
+    bp.clear = function(){
+        bp.count = bp.MAX_COUNT;
+        bp.store = [];
+    }
+
+    bp.select = function(ax, ay){
+        if(bp.count < 0){
+            return false;
+        }
+        for(var i in bp.store){
+            if(bp.isC(ax, ay, bp.store[i][0], bp.store[i][1])){
+                return false;
+            }
+        }
+        --bp.count;
+        bp.store.push([ax, ay]);
+        return true;
+    }
+    </script>
+</head>
+<body>
+    <div id="map">
+        <div id="canvas_mask"></div>
+        <canvas id="processing-canvas"></canvas>
+        <div id="txt">
+        <script type="text/javascript">
+            (function(){
+                var s = "";
+                for(var i = 0; i < bp.MAX_COUNT; i++){
+                    s += "<div></div>";
+                }
+                document.write(s);
+            })();
+            
+
+        </script>
+        </div>
+        <div id="logo"></div>
+        <div id="click-count" style="display: none;"><span></span> clicks occured!</div>
+    </div>
+
+    <script type="text/javascript">
+        var timeline = {};
+        var queue = {};
+
+        var config = {};
+        var wndWidth = $(window).width();
+
+        // canvas configration
+        config.ratio = wndWidth / 360;
+        config.width = wndWidth;
+        config.height = 180 * config.ratio;
+
+        // convert coordinate to canvas position
+        // X is longitude
+        // Y is latitude
+        function convert (xy, val, ratio, width, height) {
+            return ((xy === 'X') ? val * ratio + width / 2 : -val * ratio + height / 2);
+        };
+
+        // check is Array
+        function isArray (p_arr) {
+            return Object.prototype.toString.call(p_arr).indexOf('Array') > 0;
+        }
+
+        $(function(){
+            // config Processingjs
+            var sketch = new Processing.Sketch();
+            sketch.imageCache.add('world_map_with_nations.png');
+
+            sketch.attachFunction = function (processing) {
+              var img;
+              processing.setup = function () {
+                  processing.size(config.width, config.height);
+                  img = processing.loadImage('world_map_with_nations.png');
+              };
+              processing.draw = function () {
+                  processing.image(img, 0, 0, config.width, config.height);
+                  processing.noLoop();
+              }
+            }
+
+            var canvas = document.getElementById('processing-canvas');
+            var p = new Processing(canvas, sketch);
+
+            function drawPoint (coord, offerId, life, index) {
+                if (coord === undefined) {
+                    return false;
+                }
+                var r = convert('Y', coord[0], config.ratio, config.width, config.height),
+                    i = convert('X', coord[1], config.ratio, config.width, config.height);
+                // set point stroke
+                // and draw a point on canvas
+                p.stroke(255, 255, 255, life);
+                p.point(i, r);
+                // and set text
+                if (life == 255 && bp.select(i, r)) {
+                    $('div', '#txt').eq(index).css({'top': r, 'left': i}).text(offerDict[offerId]);
+                }
+
+                // set glow line stroke
+                p.stroke(140, 200, 255, 10);
+
+                // draw random glow lines
+                for (var s = 0; s < 4; s++) {
+                    var o = p.random(14 + s * 2),
+                        u = p.random(Math.PI * 2);
+
+                    p.line(i, r, i + o * Math.cos(u), r + o * Math.sin(u));
+                }
+            }
+
+            var clickCount = 0;
+            // long polling
+            (function poll(){
+                $.ajax({
+                    url: 'http://clickapi.ymtech.info/test/getoffers',
+                    data: 'step=60&after=' + utcStart,
+                    dataType: 'jsonp',
+                    crossDomain: true,
+                    timeout: 60000,
+                    success: function (data) {
+                        try {
+                            data = JSON.parse(data);
+                        } catch (e) {
+                            data = {data: []};
+                        }
+
+                        var newStart = null;
+                        if (!isArray(data.data)) {
+                            var tmpIP = [];
+                            for (var key in data.data) {
+                                $.each(data.data[key].clicks, function (i, n) {
+                                    tmpIP.push(n[0]);
+                                })
+                            }
+                            $.when(getGeo(tmpIP.join(',')))
+                            .done(function (geos) {
+                                for (var key in data.data) {
+                                    $.each(data.data[key].clicks, function (i, n) {
+                                        data.data[key].clicks[i][0] = geos[data.data[key].clicks[i][0]];
+                                    })
+                                }
+                            })
+
+                            // push data to timeline
+                            $.extend(timeline, data.data);
+                            newStart = data.nexttime - 0 + 1;
+                        } else {
+                            newStart = utcStart + 1;
+                        }
+
+                        // set utcStart is data's last timestamp
+                        utcStart = newStart;
+                    }
+                    , complete: function () {
+                        setTimeout(poll, 5000);
+                    }
+                });
+            })();
+
+            // every second pick up from timeline and push to processingjs queue
+            var prepareQueue = setInterval(function () {
+                var timelineKeys = Object.keys(timeline);
+                var timelineLength = timelineKeys.length;
+                if (timelineLength < 10) {
+                    var timelineFirst = timelineKeys[0];
+                    if (timeline[timelineFirst]) {
+                        timeline[timelineFirst]['lifetime'] = 255;
+                        queue[timelineFirst] = timeline[timelineFirst];
+                        delete timeline[timelineFirst];
+                    }
+                } else {
+                    for (var i = 0; i < 10; i++) {
+                        var timelineNode = timelineKeys[i];
+                        timeline[timelineNode]['lifetime'] = 255;
+                        queue[timelineNode] = timeline[timelineNode];
+                        delete timeline[timelineNode];
+                    }
+                }
+            }, 1000);
+
+            // display queue data
+            var display = setInterval(function () {
+                var queueKeys = Object.keys(queue);
+                var queueLength = queueKeys.length;
+                var queueFirst = queue[queueKeys[0]];
+                var lifeTime = 12.75; // dot fade out in 5s
+
+                if (queueLength < 50) {
+                    // lifeTime = 1.0625; // fade out in 60s
+                    lifeTime = 0.53125; // fade out in 120s
+                } else if (queueLength < 100) {
+                    // lifeTime = 2.125 // fade out in 30s
+                    lifeTime = 0.70834 // fade out in 90s
+                } else if (queueLength < 150) {
+                    // lifeTime = 6.375 // fade out in 10s
+                    lifeTime = 1.0625; // fade out in 60s
+                } else if (queueLength < 200) {
+                    // lifeTime = 21.25; // fade out in 3s
+                    lifeTime = 2.125 // fade out in 30s
+                } else if (queueLength >= 200) {
+                    // lifeTime = 63.75; // fade out in 1s
+                    lifeTime = 6.375 // fade out in 10s
+                } else if (queueLength >= 500) {
+                    // lifeTime = 127.5; // fade out in 500ms
+                    lifeTime = 63.75; // fade out in 1s
+                }
+
+                if (queueFirst) {
+                    p.redraw();
+                    bp.clear();
+                    for (var key in queue) {
+                        if (queue[key]['lifetime'] < lifeTime) {
+                            delete queue[key];
+                        } else {
+                            $.each(queue[key]['clicks'], function (i, n) {
+                                //var index = i < 5 ? i : null;
+                                drawPoint(n[0], n[1], queue[key]['lifetime'], i);
+                            })
+                            queue[key]['lifetime'] -= lifeTime;
+                        }
+                    }
+                }
+                //console.log(queue)
+            }, 250);
+
+            // reload page in 60 minutes
+            setTimeout(function () {
+                window.location.reload();
+            }, 3600000);
+        })
+    </script>
+</body>
+</html>

@@ -1,0 +1,554 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1.0, width=1024" />
+    <title>YEAHPING</title>
+
+    <style type="text/css">
+        * {
+            margin: 0;
+            padding: 0;
+        }
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+        body {
+            /*background: #0e151e;*/
+            /*background: #1A273F;*/
+            background: #22397c;
+
+        }
+		#map, #canvas_mask {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        #canvas_mask {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #map #txt div {
+            position: absolute;
+            font-size: 0.7em;
+            color: #5f96b7;
+            top: 0;
+            left: 0;
+            width: 200px;
+            padding: 2px 0 0 2px;
+            /*border-left: 1px solid #ddd;*/
+            /*font-family: monospace;*/
+            text-shadow: 1px 1px 0 #000;
+        }
+        #map #txt div.bg {
+            background: rgba(0,0,0,0.3);
+        }
+        .hide {
+            display: none;
+        }
+        #header {
+            color: #94C6FF;
+        }
+        #clickCount {
+            color: #c2d6ea;
+            text-align: right;
+            float: left;
+            width: auto;
+            padding: 1.8% 2% 0 2%;
+            font: 50px Calibri;
+        }
+        #separater{
+            background: url(separater.png) no-repeat;
+            float: left;
+            margin: 2.2% 0 0 0;
+            width: 4px;
+            height: 50px;
+        }
+        #time {
+            float: left;
+            padding: 1.9% 2% 0 2%;
+            font-size: x-large;
+            color: #c5c5c5;
+            font-family: Calibri;
+            width: auto;
+        }
+        #logo {
+            float: right;
+            margin: 2% 30px 0 0;
+            left: 20px;
+            bottom: 20px;
+            height: 55px;
+            width: 237px;
+            background: url(logo.png) no-repeat center center;
+            background-size: 180px;
+        }
+        #myCanvas {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+        }
+    </style>
+
+    <!-- <script type="text/javascript" src="libs/geos.min.js"></script> -->
+    <script type="text/javascript" src="./libs/jquery-2.0.3.min.js"></script>
+    <script type="text/javascript" src="./libs/processing-1.4.1.min.js"></script>
+    <script type="text/javascript" src="./libs/moment.min.js"></script>
+    <script type="text/javascript">
+        var offerDict = {};
+        var utcStart = moment(moment().utc().format('YYYY-MM-DD HH:mm:ss')).unix();
+
+        // get geo coordinates
+        var getGeo = function (ip) {
+            return $.Deferred(function (dfd) {
+                $.ajax({
+                    url: 'http://172.30.10.62/clickdata/test/getlatandlonbyip',
+                    data: 'ips=' + ip,
+                    dataType: 'json',
+                    method: 'post',
+                    cache: true,
+                    crossDomain: true,
+                    timeout: 60000,
+                    success: function (data) {
+                        if (!isArray(data)) {
+                            dfd.resolve(data);
+                        } else {
+                            dfd.reject(data);
+                        }
+                    }
+                })
+            }).promise();
+        }
+		
+        $(function(){
+            $.ajax({
+                url: 'offers.json',
+                dataType: 'json'
+            })
+            .done(function (offers) {
+                offerDict = offers;
+            });
+
+            // long polling
+           ;(function poll(){
+                $.ajax({
+                    // url: 'http://clickapi.ymtech.info/test/getoffers',
+                    // url: 'http://172.30.10.111/xiaobo/click/getOffers',
+                    url: 'http://clickapi.ymtech.info/click/getoffers',
+                    data: 'step=60&after=' + utcStart,
+                    dataType: 'jsonp',
+                    crossDomain: true,
+                    timeout: 60000,
+                    success: function (data) {
+                        try {
+                            data = JSON.parse(data);
+                        } catch (e) {
+                            data = {data: []};
+                        }
+
+                        var newStart = null;
+                        if (!isArray(data.data) && typeof data.data === 'object') {
+                            var tmpIP = [];
+                            for (var key in data.data) {
+                                $.each(data.data[key].clicks, function (i, n) {
+                                    tmpIP.push(n[0]);
+                                })
+                            }
+                            $.when(getGeo(tmpIP.join(',')))
+                            .done(function (geos) {
+                                for (var key in data.data) {
+                                    $.each(data.data[key].clicks, function (i, n) {
+                                        data.data[key].clicks[i][0] = geos[n[0]];
+                                                                            
+                                    })
+                                }
+                            })
+                           
+                            // push data to timeline
+                            $.extend(timeline, data.data);
+                            newStart = data.nexttime - 0 + 1;
+                        } else {
+                            newStart = utcStart + 1;
+                        }
+
+                        // set utcStart is data's last timestamp
+                        utcStart = newStart;
+                    },
+                    complete: function () {
+                        setTimeout(poll, 5000);
+                    }
+                });
+            })();
+        });
+	
+    </script>
+
+    <script type="text/javascript">
+        //added by monkee
+        window.bp = {};
+        bp.w = 200;
+        bp.h = 48;
+        bp.MAX_COUNT = 10;
+        //is conflict
+        bp.isC = function (ax, ay, bx, by) {
+            if(Math.abs(ax - bx) > bp.w || Math.abs(ay - by) > bp.h){
+                return false;
+            }
+            return true;
+        };
+        bp.count = bp.MAX_COUNT;
+        bp.store = [];
+        bp.clear = function(){
+            bp.count = bp.MAX_COUNT;
+            bp.store = [];
+        }
+
+        bp.select = function(ax, ay){
+            var num = 0;
+            if(bp.count < 0){
+                return false;
+            }
+            for(var i in bp.store){
+                if(bp.isC(ax, ay, bp.store[i][0], bp.store[i][1])){
+                    return false;
+                }
+            }
+            --bp.count;
+            bp.store.push([ax, ay]);  
+            return true;
+        }
+
+    </script>
+</head>
+<body>
+    <div id="map">
+		<div id="header">
+			<div id="clickCount"></div>
+            <div id="separater"></div>
+			<div id="time"></div>
+			<div id="logo"></div>
+		</div>
+        <div id="canvas_mask"></div>
+        <canvas id="processing-canvas"></canvas>
+        <div id="txt">
+            <script type="text/javascript">
+                (function(){
+                    var s = "";
+                    for(var i = 0; i < bp.MAX_COUNT; i++){
+                        s += "<div id="+i+"></div>";
+                    }
+                    document.write(s);
+                })();
+            </script>
+		</div>
+	   	<canvas id="myCanvas"></canvas>
+       
+    </div>
+	<script type="text/javascript"> 
+		//show the time
+		var calendar = setInterval(function(){
+			var _time = moment().format('HH:mm:ss') + '<br/>' + moment().format('ll');
+		    $('#time').html(_time);
+		}, 1000);
+
+        //add the "," to the totalAmount
+        function fnDataForm(DataStr){
+            DataStr += '';  //change to String
+            var StrA = DataStr.split('.');
+            var StrB = StrA[0];
+            var StrC = StrA.length > 1 ? '.' + StrA[1] : '';
+            var StrD = /(\d+)(\d{3})/;
+            while (StrD.test(StrB)){
+                StrB = StrB.replace(StrD, '$1' + ', ' + '$2');
+            };
+            return StrB + StrC;
+        }
+
+        //show the total clickAmount
+        function getClickNum(){
+            $.ajax({
+                url: 'http://clickapi.ymtech.info/click/getClickAmount',
+                dataType: 'jsonp',
+                crossDomain: true,
+                timeout: 60000,
+                success: function (data) {
+                    var onlineCount;
+                    try {
+                        data = JSON.parse(data);
+                    } catch (e) {
+                        data = {data: []};
+                    }               
+                    onlineCount = fnDataForm(data.data.amount);
+                    $('#clickCount').html(onlineCount);
+                }
+            });
+        }
+        getClickNum();
+        var totalCounts = setInterval('getClickNum()', 3000);
+        
+		//show the bottom chart
+        function showSpline () {
+            $.ajax({
+                url: 'http://clickapi.ymtech.info/click/getClickCount',
+                dataType: 'jsonp',
+                crossDomain: true,
+                timeout: 60000,
+                success: function (data) {
+                    var click = [];
+                    var conversion = [];
+                    try {
+                            data = JSON.parse(data);
+                        } catch (e) {
+                            data = {data: []};
+                        }     
+                    $.each(data, function (key, value) {                    
+                        click.push(value[0]);
+                        conversion.push(value[1]);
+                    });
+                    drawSpline(click, conversion);
+                }
+            });
+        }
+        showSpline();
+        setInterval('showSpline()', 600000);
+
+		var drawSpline = function (click, conversion) {
+            //init
+            var canHeight = screen.height * 0.16;       // 16% of screen height
+			var canWidth = canWidth = screen.width;     //the canvas width
+            var clickMax = Math.max.apply(null, click);
+            var conversionMax = Math.max.apply(null, conversion);
+            var maxVal = clickMax  > conversionMax ? clickMax : conversionMax;
+            var times = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"];
+            var topSpace = canHeight * 0.3;    //top space
+            var bottomSpace = topSpace * 0.6;    //bottom space
+            var blankSpace = canWidth * 0.1;   //left and right space
+            var ySpace = canWidth * 0.05;      //the whole start space 
+			var HOUR_A_DAY = 24;
+            var xScalar = (canWidth - 2 * blankSpace - ySpace + ySpace * 0.2) / (HOUR_A_DAY * 60 / 10); 
+            var yStart =  canHeight - bottomSpace;       // Y starting point  
+            var aRandom = Math.ceil(Math.random() * 10);
+            var yScalar1 = (canHeight - topSpace) / (clickMax + aRandom); 
+	                                            
+    		//set the canvas
+    		var canvasElement = $("#myCanvas")[0];
+    		var p = new Processing(canvasElement);
+    		p.size(canWidth, canHeight);
+    		p.background(34, 57, 124, 0.3);  
+
+    		//draw dashed 
+    		for(var i= blankSpace, len = canWidth - blankSpace + blankSpace * 0.3; i < len; i += 5){
+    			p.stroke("#20496e");
+    			p.point(i, topSpace);          //separator 
+    			p.point(i, yStart);            // x-axis
+    		}
+
+    		// draw y-axis 
+    		p.stroke(255, 251, 240);
+    		p.line(blankSpace + ySpace / 2, 0, blankSpace + ySpace / 2, yStart);    //y-axis 
+            p.textFont(p.createFont("Calibri", 16));    //change the font-family and font-size
+
+            // y-axis text 
+            p.textAlign(p.CENTER);
+    		p.text("1, 000, 000", blankSpace - ySpace / 2, topSpace);
+
+    		//x-axis time text 
+    		for (var i = 0, len = times.length; i <= len; i ++)
+    		{
+                var x = (canWidth - blankSpace * 2 - ySpace) / (times.length - 1); 
+                p.stroke(193, 210, 240);
+    			p.text(times[i], blankSpace + ySpace * 0.8 + i * x, canHeight - bottomSpace * 0.1); 
+    		}
+
+    		// draw the spline
+    		function plotData(dataSet, yScalar) {
+                var xStart = blankSpace + ySpace;
+    			p.noFill();
+    			p.beginShape();
+                p.curveVertex(xStart, yStart - dataSet[0] * yScalar);
+    			for (var i = 0, len = dataSet.length; i < len; i++) {
+    		       p.curveVertex(i * xScalar + xStart, yStart - dataSet[i] * yScalar);
+    			}
+    			p.endShape();
+    		}
+    		p.stroke(79, 145, 202);      //blue color #4f91ca
+    		plotData(click, yScalar1);
+        }	
+	</script>
+
+    <script type="text/javascript">
+        // initialize click data timeline and display queue object
+        var timeline = {};
+        var queue = {};
+        var config = {};
+        var wndWidth = $(window).width();
+
+        // canvas configration
+        config.ratio = wndWidth / 360;
+        config.width = wndWidth;
+        config.height = 180 * config.ratio;
+
+        // convert coordinate to canvas position
+        // X is longitude
+        // Y is latitude
+        function convert (xy, val, ratio, width, height) {
+            return ((xy === 'X') ? val * ratio + width / 2 : -val * ratio + height / 2);
+        };
+
+        // check is Array
+        function isArray (p_arr) {
+            return Object.prototype.toString.call(p_arr).indexOf('Array') > 0;
+        }
+
+        $(function(){
+            // config Processingjs
+            var sketch = new Processing.Sketch();
+            sketch.imageCache.add('world_map_with_nations.png');
+
+            sketch.attachFunction = function (processing) {
+              var img;
+              processing.setup = function () {
+                  processing.size(config.width, config.height);
+                  img = processing.loadImage('world_map_with_nations.png');
+              };
+              processing.draw = function () {
+                  processing.image(img, 0, 0, config.width, config.height);
+                  processing.noLoop();
+              }
+            }
+
+            var canvas = document.getElementById('processing-canvas');
+            var p = new Processing(canvas, sketch);
+
+            // draw point on canvas
+            function drawPoint (data, life, index) {
+                if (data[0] === undefined) {
+                    return false;
+                }
+                var r = convert('Y', data[0][0], config.ratio, config.width, config.height),
+                    i = convert('X', data[0][1], config.ratio, config.width, config.height);
+                var country = ['App Download - BR-(Tier1)','App Download - MB-(Tier1)', 'App Download - MA-(Tier1)', 'App Download - DB-(Tier1)', 'App Download - MH(INTL)-(Tier1)','App Download - AR-(Tier1)', 'App Download - OP-(Tier1)'];
+                var randomCountry = Math.floor(Math.random() * country.length); 
+                var indexT = (offerDict[data[1]] == 'App Download - Mobogenie(INTL)-(Tier1)') ? country[randomCountry] : offerDict[data[1]];
+                // set point stroke
+                // and draw a point on canvas
+                p.stroke(255, 255, 255, life);
+                p.point(i, r);
+                // and set text
+
+                if (life == 255 && bp.select(i, r)) { 
+                    var num = bp.store.length - 1;
+                    // offer's top offset 
+                    var offset1 = $('#clickCount').css('padding-top');  //string
+                    var offset2 = $('#clickCount').height();            //number
+                    offset1 = parseInt(offset1.replace(/px/,''));       //change type string to number
+                    var offset = Math.ceil(offset1 + offset2);
+                    if(wndWidth - i < bp.w){
+                        var divcss1 = {
+                            'top': r + offset, 
+                            'left': i - bp.w, 
+                            'border-left':'', 
+                            'border-right':'1px solid #ddd', 
+                            'direction': 'rtl'
+                        };
+                        $('div', '#txt').eq(num).css(divcss1).text(indexT); 
+                    }else{
+                        var divcss2 = {
+                            'top': r + offset,  
+                            'left': i, 
+                            'border-right':'',
+                            'border-left':'1px solid #ddd',
+                             'direction': 'ltr'
+                         };
+                        $('div', '#txt').eq(num).css(divcss2).text(indexT); 
+                    }
+                }
+
+                // set glow line stroke
+                p.stroke(140, 200, 255, 10);
+
+                // draw random glow lines
+                for (var s = 0; s < 5; s++) {
+                    var o = p.random(14 + s * 2),
+                        u = p.random(Math.PI * 2);    
+                    p.line(i, r, i + o * Math.cos(u), r + o * Math.sin(u));   
+                }
+            }
+
+            // every second pick up from timeline and push to processingjs queue
+            var prepareQueue = setInterval(function () {
+                var timelineKeys = Object.keys(timeline);
+                var timelineLength = timelineKeys.length;
+                if (timelineLength < 10) {
+                    var timelineFirst = timelineKeys[0];
+                    if (timeline[timelineFirst]) {
+                        timeline[timelineFirst]['lifetime'] = 255;
+                        queue[timelineFirst] = timeline[timelineFirst];
+                        delete timeline[timelineFirst];
+                    }
+                } else {
+                    for (var i = 0; i < 10; i++) {
+                        var timelineNode = timelineKeys[i];
+                        timeline[timelineNode]['lifetime'] = 255;
+                        queue[timelineNode] = timeline[timelineNode];
+                        delete timeline[timelineNode];
+                    }
+                }
+            }, 1000);
+
+            // display queue data
+            var display = setInterval(function () {
+                var queueKeys = Object.keys(queue);
+                var queueLength = queueKeys.length;
+                var queueFirst = queue[queueKeys[0]];
+                var lifeTime = 12.75; // dot fade out in 5s
+                if (queueLength < 50) {
+                    lifeTime = 0.53125; // fade out in 120s
+                } else if (queueLength < 100) {
+                    lifeTime = 0.70834 // fade out in 90s
+                } else if (queueLength < 150) {
+                    lifeTime = 1.0625; // fade out in 60s
+                } else if (queueLength < 200) {
+                    lifeTime = 2.125 // fade out in 30s
+                } else if (queueLength >= 200) {
+                    lifeTime = 6.735 // fade out in 10s
+                } else if (queueLength >= 500) {
+                    lifeTime = 63.75; // fade out in 1s
+                }
+                // 255 / (1000 * 250) = 63.75
+
+                // clear offer name div
+                var len_bp_store = bp.store.length;
+                if (len_bp_store > 0 && len_bp_store < bp.MAX_COUNT) {
+                    for (var i = bp.MAX_COUNT; i > len_bp_store; i--) {
+                        $('div', '#txt').eq(i).empty();
+                    }
+                }
+                bp.clear();
+                if (queueFirst) {
+                    p.redraw();
+                    for (var key in queue) {
+                        if (queue[key]['lifetime'] < lifeTime) {
+                            delete queue[key];
+                        } else {
+                            $.each(queue[key]['clicks'], function (i, n) {
+                                //var index = i < 5 ? i : null;                               
+                                drawPoint(n, queue[key]['lifetime'], i);
+                            })
+                            queue[key]['lifetime'] -= lifeTime;        
+                        }
+                    }
+
+                }
+            }, 250);
+            // reload page in 60 minutes
+            setTimeout(function () {
+                window.location.reload();
+            }, 3600000);
+        })
+    </script>
+</body>
+</html>
