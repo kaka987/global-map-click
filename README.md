@@ -1,2 +1,2 @@
-# yeahping
-yeahping
+# global-map-click
+global-map-click
